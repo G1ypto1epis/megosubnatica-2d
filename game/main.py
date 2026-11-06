@@ -15506,6 +15506,16 @@ class Game:
         self.setting_plankton_enabled = NIGHT_PLANKTON_ENABLED
         self.setting_seabed_details_enabled = True
         self.setting_water_darkening_enabled = True
+        self.setting_music_enabled = True
+        try:
+            if not pygame.mixer.get_init():
+                pygame.mixer.init()
+            music_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "underwater_music.ogg")
+            pygame.mixer.music.load(music_path)
+            pygame.mixer.music.set_volume(0.35)
+            pygame.mixer.music.play(-1)
+        except (pygame.error, OSError) as exc:
+            print("Music unavailable:", exc)
 
         self.player_hp = 25
         self.max_player_hp = 25
@@ -20810,6 +20820,7 @@ class Game:
                         pygame.Rect(panel_x + 24, panel_y + 84, 472, 48),
                         pygame.Rect(panel_x + 24, panel_y + 142, 472, 48),
                         pygame.Rect(panel_x + 24, panel_y + 200, 472, 48),
+                        pygame.Rect(panel_x + 24, panel_y + 258, 472, 48),
                     ]
                     if option_rects[0].collidepoint(mouse_x, mouse_y):
                         self.setting_plankton_enabled = not self.setting_plankton_enabled
@@ -20820,6 +20831,10 @@ class Game:
                         self.setting_seabed_details_enabled = not self.setting_seabed_details_enabled
                     elif option_rects[2].collidepoint(mouse_x, mouse_y):
                         self.setting_water_darkening_enabled = not self.setting_water_darkening_enabled
+                    elif option_rects[3].collidepoint(mouse_x, mouse_y):
+                        self.setting_music_enabled = not self.setting_music_enabled
+                        if pygame.mixer.get_init():
+                            pygame.mixer.music.set_volume(0.35 if self.setting_music_enabled else 0.0)
             elif (event.type == pygame.MOUSEBUTTONDOWN
                   and event.button == 1):
                 if self.state == "playing":
@@ -23571,6 +23586,7 @@ class Game:
             ("Отключить планктон", not self.setting_plankton_enabled),
             ("Отключить мелкие объекты на дне", not self.setting_seabed_details_enabled),
             ("Отключить затемнение воды", not self.setting_water_darkening_enabled),
+            ("Отключить музыку", not self.setting_music_enabled),
         ]
         for index, (label, disabled) in enumerate(options):
             rect = pygame.Rect(panel.x + 24, panel.y + 84 + index * 58, 472, 48)
@@ -24288,6 +24304,8 @@ async def main():
             game.handle_events()  # The original event processing is preserved.
             if not game.running:
                 # Escape from the game returns to the main menu.
+                if pygame.mixer.get_init():
+                    pygame.mixer.music.stop()
                 game = None
                 scene = "menu"
             else:
@@ -24295,6 +24313,8 @@ async def main():
                 if game.player_hp <= 0 or game.state == "dead":
                     death_stats = "Прожито игровых суток: {:.1f}".format(
                         game.elapsed_game_days)
+                    if pygame.mixer.get_init():
+                        pygame.mixer.music.stop()
                     game = None  # New game = new world, health, inventory, fauna.
                     scene = "dead"
                 else:
