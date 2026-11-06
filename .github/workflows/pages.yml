@@ -1,0 +1,67 @@
+name: Build and deploy Megosubnatica2D to GitHub Pages
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: true
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - name: Get sources
+        uses: actions/checkout@v4
+
+      - name: Python for pygbag
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install browser game packager
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pygbag==0.9.3
+
+      - name: Download Cyrillic font for browser interface (OFL)
+        run: |
+          curl --fail --location --retry 3 \
+            --output game/NotoSans.ttf \
+            'https://raw.githubusercontent.com/google/fonts/main/ofl/notosans/NotoSans%5Bwdth%2Cwght%5D.ttf'
+          curl --fail --location --retry 3 \
+            --output game/OFL-NotoSans.txt \
+            'https://raw.githubusercontent.com/google/fonts/main/ofl/notosans/OFL.txt'
+          python -c "from pathlib import Path; b=Path('game/NotoSans.ttf').read_bytes(); assert b[:4] in (bytes.fromhex('00010000'),b'OTTO')"
+
+      - name: Check game syntax
+        run: python -m py_compile game/main.py
+
+      - name: Compile complete Pygame game for browser
+        run: |
+          python -m pygbag --build --ume_block 0 --title 'Мегосубнатика 2D' game
+          test -f game/build/web/index.html
+          python tools/patch_mobile_html.py game/build/web/index.html
+          touch game/build/web/.nojekyll
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload compiled site
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: game/build/web
+
+      - name: Publish Pages
+        id: deploy
+        uses: actions/deploy-pages@v4
