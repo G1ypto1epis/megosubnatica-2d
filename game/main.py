@@ -15517,7 +15517,7 @@ class Game:
             pygame.mixer.music.load(music_path)
             pygame.mixer.music.set_volume(0.35)
             pygame.mixer.music.play(-1)
-            for key, filename in (("spark", "electric_spark.wav"), ("sonar", "sonar_ping.mp3"), ("swim", "swim.ogg")):
+            for key, filename in (("spark", "electric_spark.wav"), ("sonar", "sonar_ping.ogg"), ("swim", "swim.ogg")):
                 try:
                     self._sounds[key] = pygame.mixer.Sound(os.path.join(os.path.dirname(os.path.abspath(__file__)), filename))
                 except (pygame.error, OSError) as exc:
