@@ -15681,6 +15681,7 @@ class Game:
         # поверхности (морские звёзды, мелкие камни, кораллы, обрастания
         # и вариации тона), не перегружая каждый кадр.
         self._seabed_tile_cache = {}
+        self._visual_cell_cache = {}
         self._seabed_theme_cache = {}
         # Кэш пещерных тайлов: отдельные варианты пола и стен с
         # каменными прожилками, мелкими камнями, кристаллами и
@@ -21697,6 +21698,10 @@ class Game:
     def _get_seabed_tile_surface(self, biome, x, y):
         if biome is None:
             return None
+        cell_key = ("surface", id(biome), x, y)
+        cached = self._visual_cell_cache.get(cell_key)
+        if cached is not None:
+            return cached
         theme = self._surface_theme_for_biome(biome)
         if theme is None:
             return None
@@ -21706,6 +21711,9 @@ class Game:
         if tile is None:
             tile = self._build_seabed_tile_surface(biome, variant)
             self._seabed_tile_cache[key] = tile
+        if len(self._visual_cell_cache) >= 20000:
+            self._visual_cell_cache.clear()
+        self._visual_cell_cache[cell_key] = tile
         return tile
 
     def _cave_theme_for_tunnel(self, tunnel):
@@ -22004,6 +22012,10 @@ class Game:
     def _get_cave_floor_tile_surface(self, tunnel, x, y):
         if tunnel is None:
             return None
+        cell_key = ("cave", id(tunnel), x, y)
+        cached = self._visual_cell_cache.get(cell_key)
+        if cached is not None:
+            return cached
         theme = self._cave_theme_for_tunnel(tunnel)
         variant = self._stable_visual_hash(tunnel.name, x // 2, y // 2, x % 3, y % 3) % 24
         key = (theme['key'], tuple(theme['base_mix']), tuple(theme['highlight']), tuple(theme['shadow']), variant)
@@ -22011,14 +22023,24 @@ class Game:
         if tile is None:
             tile = self._build_cave_floor_tile_surface(tunnel, variant)
             self._cave_floor_tile_cache[key] = tile
+        if len(self._visual_cell_cache) >= 20000:
+            self._visual_cell_cache.clear()
+        self._visual_cell_cache[cell_key] = tile
         return tile
 
     def _get_cave_wall_tile_surface(self, x, y):
+        cell_key = ("wall", x, y)
+        cached = self._visual_cell_cache.get(cell_key)
+        if cached is not None:
+            return cached
         variant = self._stable_visual_hash('cave_wall', x // 2, y // 2, x % 5, y % 5) % 32
         tile = self._cave_wall_tile_cache.get(variant)
         if tile is None:
             tile = self._build_cave_wall_tile_surface(variant)
             self._cave_wall_tile_cache[variant] = tile
+        if len(self._visual_cell_cache) >= 20000:
+            self._visual_cell_cache.clear()
+        self._visual_cell_cache[cell_key] = tile
         return tile
 
     def draw_cave_cell(self, x, y, screen_x, screen_y, tunnel):
