@@ -15507,6 +15507,9 @@ class Game:
         self.setting_seabed_details_enabled = True
         self.setting_water_darkening_enabled = True
         self.setting_music_enabled = True
+        self.setting_effects_enabled = True
+        self._sounds = {}
+        self._sound_times = {}
         try:
             if not pygame.mixer.get_init():
                 pygame.mixer.init()
@@ -15514,6 +15517,11 @@ class Game:
             pygame.mixer.music.load(music_path)
             pygame.mixer.music.set_volume(0.35)
             pygame.mixer.music.play(-1)
+            for key, filename in (("spark", "electric_spark.wav"), ("sonar", "sonar_ping.mp3"), ("swim", "swim.ogg")):
+                try:
+                    self._sounds[key] = pygame.mixer.Sound(os.path.join(os.path.dirname(os.path.abspath(__file__)), filename))
+                except (pygame.error, OSError) as exc:
+                    print("Sound unavailable:", filename, exc)
         except (pygame.error, OSError) as exc:
             print("Music unavailable:", exc)
 
@@ -18123,7 +18131,19 @@ class Game:
                 best = (dist_sq, x, y, label)
         return best
 
+    def _play_effect(self, key, volume=0.5, interval=0):
+        if not self.setting_effects_enabled or key not in self._sounds:
+            return
+        now = pygame.time.get_ticks()
+        if now - self._sound_times.get(key, -100000) < interval:
+            return
+        self._sound_times[key] = now
+        channel = self._sounds[key].play()
+        if channel is not None:
+            channel.set_volume(max(0.0, min(1.0, volume)))
+
     def _scan_environment(self, passive=False):
+        self._play_effect("sonar", 0.4, 1200)
         radius = 8
         if self.inventory_counts.get(scanner_range, 0) > 0:
             radius += 3
@@ -18352,6 +18372,7 @@ class Game:
         return pygame.transform.smoothscale(source, (nw, nh))
 
     def scan_with_scanner(self):
+        self._play_effect("sonar", 0.4, 1200)
         if not self._is_scanner_selected():
             return False
 
@@ -20815,12 +20836,13 @@ class Game:
                 if event.button == 1:
                     mouse_x, mouse_y = event.pos
                     panel_x = (SCREEN_SIZE - 520) // 2
-                    panel_y = (SCREEN_SIZE - 340) // 2
+                    panel_y = (SCREEN_SIZE - 400) // 2
                     option_rects = [
                         pygame.Rect(panel_x + 24, panel_y + 84, 472, 48),
                         pygame.Rect(panel_x + 24, panel_y + 142, 472, 48),
                         pygame.Rect(panel_x + 24, panel_y + 200, 472, 48),
                         pygame.Rect(panel_x + 24, panel_y + 258, 472, 48),
+                        pygame.Rect(panel_x + 24, panel_y + 316, 472, 48),
                     ]
                     if option_rects[0].collidepoint(mouse_x, mouse_y):
                         self.setting_plankton_enabled = not self.setting_plankton_enabled
@@ -20835,6 +20857,10 @@ class Game:
                         self.setting_music_enabled = not self.setting_music_enabled
                         if pygame.mixer.get_init():
                             pygame.mixer.music.set_volume(0.35 if self.setting_music_enabled else 0.0)
+                    elif option_rects[4].collidepoint(mouse_x, mouse_y):
+                        self.setting_effects_enabled = not self.setting_effects_enabled
+                        if not self.setting_effects_enabled and pygame.mixer.get_init():
+                            pygame.mixer.stop()
             elif (event.type == pygame.MOUSEBUTTONDOWN
                   and event.button == 1):
                 if self.state == "playing":
@@ -22379,6 +22405,8 @@ class Game:
 
         player_move_x = self.player_x - old_player_x
         player_move_y = self.player_y - old_player_y
+        if self.active_vehicle is None and player_move_x * player_move_x + player_move_y * player_move_y > 0.00001:
+            self._play_effect("swim", 0.22, 2200)
 
         # -------------------------------------------------
         # ПОВОРОТ ИГРОКА
@@ -22579,6 +22607,8 @@ class Game:
                 attack_distance_squared = attack_dx ** 2 + attack_dy ** 2
                 if (attack_distance_squared <= 2.25
                         and animal.attack_timer <= 0):
+                    if animal.type is ampeel_type:
+                        self._play_effect("spark", 0.7 * max(0.0, 1.0 - math.sqrt(distance_squared) / 18.0), 800)
                     pet_target.hp -= max(1, int(animal.type.damage))
                     animal.attack_timer = animal.attack_cooldown
                     self.cooldown_animals.add(animal)
@@ -22602,6 +22632,8 @@ class Game:
 
             if (attack_distance_squared <= 2.25
                     and animal.attack_timer <= 0):
+                if animal.type is ampeel_type:
+                    self._play_effect("spark", 0.7 * max(0.0, 1.0 - math.sqrt(attack_distance_squared) / 18.0), 800)
                 if self.active_vehicle is not None:
                     self.vehicle_take_damage(animal.type.damage)
                 else:
@@ -23573,7 +23605,7 @@ class Game:
         self.screen.blit(overlay, (0, 0))
 
         panel = pygame.Rect((SCREEN_SIZE - 520) // 2,
-                            (SCREEN_SIZE - 340) // 2, 520, 340)
+                            (SCREEN_SIZE - 400) // 2, 520, 400)
         pygame.draw.rect(self.screen, (13, 32, 47), panel, border_radius=12)
         pygame.draw.rect(self.screen, (74, 174, 205), panel, 2, border_radius=12)
 
@@ -23587,6 +23619,7 @@ class Game:
             ("Отключить мелкие объекты на дне", not self.setting_seabed_details_enabled),
             ("Отключить затемнение воды", not self.setting_water_darkening_enabled),
             ("Отключить музыку", not self.setting_music_enabled),
+            ("Отключить звуковые эффекты", not self.setting_effects_enabled),
         ]
         for index, (label, disabled) in enumerate(options):
             rect = pygame.Rect(panel.x + 24, panel.y + 84 + index * 58, 472, 48)

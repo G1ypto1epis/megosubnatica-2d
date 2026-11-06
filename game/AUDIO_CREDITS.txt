@@ -1,3 +1,6 @@
 Underwater Ambient Pad — isaiah658
 Source: https://opengameart.org/content/underwater-ambient-pad
 License: CC0 1.0 Universal, https://creativecommons.org/publicdomain/zero/1.0/
+Electricity Sound Effects (spark.wav) — BMacZero, CC0: https://opengameart.org/content/electricity-sound-effects-0
+Sonar Ping — CC0: https://opengameart.org/content/sonar-ping
+Skippy Fish Water Sound Collection (swim.ogg) — jcpmcdonald, CC0: https://opengameart.org/content/skippy-fish-water-sound-collection
