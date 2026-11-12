@@ -1098,7 +1098,7 @@ PREDATOR_DETECTION_RANGE_BY_NAME = {
     "Crabsquid": 5.0,
     "Ampeel": 4.5,
     "Warper": 5.0,
-    "Reaper Leviathan": 7.0,
+    "Reaper Leviathan": 14.0,
     "Ghost Leviathan": 7.0,
     "Sea Dragon Leviathan": 8.0,
     "Dragon Leviathan": 8.0,
@@ -12901,7 +12901,7 @@ def init_assets():
 
     reaper_type = AnimalType(
         "Reaper Leviathan", (225, 220, 205), 180,
-        speed=0.075, behavior="predator", hp=420,
+        speed=0.15, behavior="predator", hp=420,
         damage=20, edible=False,
         fish_length=230, fish_width=52,
         sprite_kind='reaper'
@@ -14876,10 +14876,10 @@ class Animal:
         return best_angle
 
     def update(self, player_x, player_y, world):
-        self.active = (
-            abs(self.x-player_x) <= VIEW_RADIUS
-            and abs(self.y-player_y) <= VIEW_RADIUS
-        )
+        radius = max(VIEW_RADIUS, PREDATOR_DETECTION_RANGE_BY_NAME.get(
+            self.type.name, PREDATOR_DETECTION_RANGE_DEFAULT)) if self.type.behavior == "predator" else VIEW_RADIUS
+        self.active = (abs(self.x-player_x) <= radius
+                       and abs(self.y-player_y) <= radius)
         if self.hp <= 0:
             return
 
@@ -15669,6 +15669,17 @@ class Game:
         self.ecosystem_refresh_interval_days = 4.0
         self.next_ecosystem_refresh_day = self.ecosystem_refresh_interval_days
         self._capture_ecosystem_targets()
+        self.fauna_editor = False
+        self.fauna_mode = 'population'
+        self.fauna_biome_index = 0
+        self.fauna_type_index = 0
+        self.fauna_input = ''
+        self.fauna_pending = {}
+        self.fauna_custom_targets = set()
+        self.fauna_types = sorted(
+            {v for v in START_ITEM_REGISTRY.values() if isinstance(v, AnimalType)}
+            | {kind for biome in self.world.biomes for kind, _ in biome.animals}
+            | {animal.type for animal in self.cave_animals}, key=lambda v: v.name)
 
         self.day_overlay = pygame.Surface(
             (SCREEN_SIZE, SCREEN_SIZE)
@@ -15951,6 +15962,12 @@ class Game:
         surface_added = False
         for (biome, animal_type), target_count in (
                 self.surface_fauna_targets.items()):
+            if (biome, animal_type) in self.fauna_custom_targets:
+                if surface_fauna_counts.get((biome, animal_type), 0) < target_count:
+                    self.fauna_pending[(biome, animal_type)] = target_count
+                continue
+            if (biome, animal_type) in self.fauna_pending:
+                continue
             missing = max(
                 0,
                 target_count - surface_fauna_counts.get(
@@ -17341,6 +17358,8 @@ class Game:
         return self.world.animals
 
     def get_nearby_animals(self, radius):
+        if radius >= MAP_SIZE:
+            return list(self.get_current_animals())
         if self.in_cave:
             player_x = self.player_x
             player_y = self.player_y
@@ -20601,6 +20620,20 @@ class Game:
         for event in pending_events:
             if self.mobile_controls.intercept_event(event):
                 continue
+            if self.settings_open and self.fauna_editor:
+                if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                    self.handle_fauna_editor_click(event.pos)
+                    continue
+                if event.type == pygame.KEYDOWN:
+                    if event.key in (pygame.K_ESCAPE, pygame.K_n):
+                        self.fauna_editor = False
+                    elif event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
+                        self.apply_fauna_input()
+                    elif event.key == pygame.K_BACKSPACE:
+                        self.fauna_input = self.fauna_input[:-1]
+                    elif event.unicode in '0123456789' and event.unicode:
+                        self.fauna_input += event.unicode
+                    continue
             if event.type == pygame.KEYDOWN and event.key == pygame.K_F9:
                 self.mobile_controls.enabled = not self.mobile_controls.enabled
                 self.mobile_controls.joy_value = (0.0, 0.0)
@@ -20835,6 +20868,10 @@ class Game:
                   and self.settings_open):
                 if event.button == 1:
                     mouse_x, mouse_y = event.pos
+                    if pygame.Rect(80, 524, 470, 40).collidepoint(mouse_x, mouse_y):
+                        self.fauna_editor = True
+                        self.fauna_input = ''
+                        continue
                     panel_x = (SCREEN_SIZE - 520) // 2
                     panel_y = (SCREEN_SIZE - 400) // 2
                     option_rects = [
@@ -22296,6 +22333,7 @@ class Game:
     # =====================================================
 
     def update(self):
+        self.update_fauna_pending()
         if self.state == "map":
             self.update_map_pan()
             self.update_notification()
@@ -22449,7 +22487,7 @@ class Game:
         # ЖИВОТНЫЕ
         # -------------------------------------------------
 
-        active_radius = VIEW_RADIUS + 2
+        active_radius = min(MAP_SIZE * 2, max(VIEW_RADIUS + 2, max(PREDATOR_DETECTION_RANGE_BY_NAME.values(), default=0), PREDATOR_DETECTION_RANGE_DEFAULT))
         active_radius_squared = active_radius ** 2
 
         player_x = self.player_x
@@ -23598,8 +23636,112 @@ class Game:
     # ПАНЕЛЬ НАСТРОЕК (N)
     # =====================================================
 
+    def fauna_selection(self):
+        biomes = [b for b in self.world.biomes if b.passable]
+        types = (self.fauna_types if self.fauna_mode == 'population' else
+                 [t for t in self.fauna_types if t.behavior == 'predator'])
+        self.fauna_biome_index %= len(biomes)
+        self.fauna_type_index %= len(types)
+        return biomes[self.fauna_biome_index], types[self.fauna_type_index]
+
+    def apply_fauna_input(self):
+        if not self.fauna_input:
+            return
+        try:
+            value = int(self.fauna_input)
+        except ValueError:
+            return
+        biome, animal_type = self.fauna_selection()
+        if self.fauna_mode == 'range':
+            PREDATOR_DETECTION_RANGE_BY_NAME[animal_type.name] = value
+        else:
+            key = (biome, animal_type)
+            self.surface_fauna_targets[key] = value
+            self.fauna_custom_targets.add(key)
+            self.fauna_pending[key] = value
+        self.fauna_input = ''
+
+    def update_fauna_pending(self):
+        if not getattr(self, 'fauna_pending', None):
+            return
+        key = next(iter(self.fauna_pending))
+        biome, animal_type = key
+        target = self.fauna_pending[key]
+        existing = [a for a in self.world.animals
+                    if a.home_biome is biome and a.type is animal_type
+                    and not getattr(a, 'is_companion', False)]
+        if len(existing) > target:
+            for animal in existing[target:target + 30]:
+                self.cooldown_animals.discard(animal)
+                self.world.remove_animal(animal)
+        elif len(existing) < target:
+            for _ in range(min(30, target - len(existing))):
+                if not self._spawn_missing_surface_animal(biome, animal_type):
+                    self.notification = 'Не удалось разместить существ в этом биоме'
+                    self.notification_timer = 180
+                    self.fauna_pending.pop(key, None)
+                    break
+            self.world.rebuild_animal_index()
+        else:
+            self.fauna_pending.pop(key, None)
+
+    def handle_fauna_editor_click(self, pos):
+        x, y = pos
+        if 55 <= y < 95:
+            self.fauna_mode = 'range' if self.fauna_mode == 'population' else 'population'
+            self.fauna_type_index = 0
+            self.fauna_input = ''
+        elif 110 <= y < 155 and self.fauna_mode == 'population':
+            self.fauna_biome_index += -1 if x < SCREEN_SIZE // 2 else 1
+            self.fauna_input = ''
+        elif 165 <= y < 210:
+            self.fauna_type_index += -1 if x < SCREEN_SIZE // 2 else 1
+            self.fauna_input = ''
+        elif 280 <= y < 460 and 150 <= x < 480:
+            col, row = (x - 150) // 110, (y - 280) // 45
+            key = (('1', '2', '3'), ('4', '5', '6'),
+                   ('7', '8', '9'), ('C', '0', '<'))[row][col]
+            if key == 'C':
+                self.fauna_input = ''
+            elif key == '<':
+                self.fauna_input = self.fauna_input[:-1]
+            else:
+                self.fauna_input += key
+        elif 475 <= y < 520:
+            self.apply_fauna_input()
+        elif 530 <= y < 575:
+            self.fauna_editor = False
+
+    def draw_fauna_editor(self):
+        self.screen.fill((13, 32, 47))
+        biome, animal_type = self.fauna_selection()
+        def label(text, y, color=(230, 241, 247)):
+            image = self.font.render(str(text), True, color)
+            self.screen.blit(image, image.get_rect(center=(SCREEN_SIZE // 2, y)))
+        def button(rect, text):
+            pygame.draw.rect(self.screen, (25, 75, 95), rect, border_radius=6)
+            image = self.font.render(text, True, (230, 241, 247))
+            self.screen.blit(image, image.get_rect(center=rect.center))
+        button(pygame.Rect(80, 55, 470, 40), 'Режим: ' + ('количество' if self.fauna_mode == 'population' else 'дальность'))
+        if self.fauna_mode == 'population':
+            button(pygame.Rect(80, 110, 470, 45), '<   ' + biome.name + '   >')
+        button(pygame.Rect(80, 165, 470, 45), '<   ' + animal_type.name + '   >')
+        value = (self.surface_fauna_targets.get((biome, animal_type), 0)
+                 if self.fauna_mode == 'population' else
+                 PREDATOR_DETECTION_RANGE_BY_NAME.get(animal_type.name, PREDATOR_DETECTION_RANGE_DEFAULT))
+        label('Текущее: ' + str(value), 230)
+        label('Ввод: ' + (self.fauna_input or '—'), 260)
+        for row, keys in enumerate(('123', '456', '789', 'C0<')):
+            for col, key in enumerate(keys):
+                button(pygame.Rect(150 + col * 110, 280 + row * 45, 102, 40), key)
+        button(pygame.Rect(150, 475, 330, 45), 'Применить')
+        button(pygame.Rect(150, 530, 330, 45), 'Назад')
+
     def draw_settings_panel(self):
         """Модальная панель графических настроек с кликабельными пунктами."""
+        if self.fauna_editor:
+            self.draw_fauna_editor()
+            return
         overlay = pygame.Surface((SCREEN_SIZE, SCREEN_SIZE), pygame.SRCALPHA)
         overlay.fill((0, 0, 0, 175))
         self.screen.blit(overlay, (0, 0))
@@ -23641,6 +23783,10 @@ class Game:
         hint = self.tiny_font.render("Изменения применяются сразу и сохраняются при закрытии меню.",
                                      True, (153, 183, 195))
         self.screen.blit(hint, hint.get_rect(center=(panel.centerx, panel.bottom - 16)))
+        rect = pygame.Rect(80, 524, 470, 40)
+        pygame.draw.rect(self.screen, (25, 75, 95), rect, border_radius=7)
+        text = self.font.render('Фауна и дальность хищников', True, (230, 241, 247))
+        self.screen.blit(text, text.get_rect(center=rect.center))
 
     # =====================================================
     # HUD
